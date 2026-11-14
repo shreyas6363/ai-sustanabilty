@@ -1,0 +1,236 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Organization {
+  id               String            @id @default(cuid())
+  name             String
+  organizationType String            @default("Educational Campus")
+  location         String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  
+  users            User[]
+  buildings        Building[]
+  resourceRecords  ResourceRecord[]
+  wasteRecords     WasteRecord[]
+  emissionFactors  EmissionFactor[]
+  anomalies        Anomaly[]
+  forecasts        Forecast[]
+  recommendations  Recommendation[]
+  devices          Device[]
+  auditLogs        AuditLog[]
+  alerts           AlertNotification[]
+}
+
+model User {
+  id             String       @id @default(cuid())
+  name           String
+  email          String       @unique
+  passwordHash   String
+  role           String       @default("VIEWER") // ADMIN, MANAGER, VIEWER
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  auditLogs      AuditLog[]
+}
+
+model Building {
+  id                String            @id @default(cuid())
+  organizationId    String
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name              String
+  code              String            // e.g., MAB-01, SCI-03
+  location          String
+  areaSqFt          Float?            // Floor area for intensity metrics
+  occupancy         Int?              // Average occupancy
+  operatingSchedule String?           // e.g., "08:00 - 20:00, Mon-Fri"
+  status            String            @default("ACTIVE") // ACTIVE, INACTIVE, RENOVATION
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  resourceRecords   ResourceRecord[]
+  wasteRecords      WasteRecord[]
+  anomalies         Anomaly[]
+  forecasts         Forecast[]
+  recommendations   Recommendation[]
+  devices           Device[]
+  alerts            AlertNotification[]
+
+  @@unique([organizationId, code])
+}
+
+model ResourceRecord {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  buildingId     String
+  building       Building     @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  resourceType   String       // WATER, ELECTRICITY
+  quantity       Float        // Litres (Water), kWh (Electricity)
+  unit           String       // L, kWh
+  category       String?      // Domestic, HVAC, Labs, Irrigation, Lighting
+  recordedAt     DateTime
+  dataSource     String       @default("MANUAL") // MANUAL, CSV_IMPORT, IOT_SENSOR, DEMO_SIMULATION
+  notes          String?
+  createdBy      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, resourceType, recordedAt])
+  @@index([buildingId, recordedAt])
+}
+
+model WasteRecord {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  buildingId        String
+  building          Building     @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  wasteCategory     String       // ORGANIC, PAPER, PLASTIC, GLASS, METAL, E_WASTE, RESIDUAL, OTHER
+  quantityKg        Float
+  disposalMethod    String       @default("RECYCLING") // RECYCLING, COMPOSTING, LANDFILL, INCINERATION, SPECIAL_PROCESSING
+  recyclable        Boolean      @default(false)
+  recordedAt        DateTime
+  dataSource        String       @default("MANUAL") // MANUAL, CSV_IMPORT, IOT_SENSOR, DEMO_SIMULATION
+  collectionDetails String?
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([organizationId, wasteCategory, recordedAt])
+  @@index([buildingId, recordedAt])
+}
+
+model EmissionFactor {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  resourceType   String       // ELECTRICITY, WATER, WASTE_ORGANIC, WASTE_PLASTIC, WASTE_LANDFILL, etc.
+  factorValue    Float        // kg CO2e per unit
+  factorUnit     String       // kg CO2e/kWh, kg CO2e/1000L, kg CO2e/kg
+  source         String       // Source agency / reference citation
+  isDefault      Boolean      @default(true)
+  effectiveDate  DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, resourceType])
+}
+
+model Anomaly {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  buildingId     String
+  building       Building     @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  resourceType   String       // WATER, ELECTRICITY, WASTE
+  severity       String       // LOW, MEDIUM, HIGH, CRITICAL
+  observedValue  Float
+  expectedValue  Float
+  deviationPct   Float
+  explanation    String
+  detectedAt     DateTime     @default(now())
+  status         String       @default("OPEN") // OPEN, INVESTIGATING, RESOLVED, DISMISSED
+  resolvedAt     DateTime?
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, status, detectedAt])
+}
+
+model Forecast {
+  id               String       @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  buildingId       String?
+  building         Building?    @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+  resourceType     String       // WATER, ELECTRICITY, WASTE
+  predictedValue   Float
+  predictionDate   DateTime
+  confidenceLower  Float?
+  confidenceUpper  Float?
+  method           String       // 7-Day Weighted Moving Average, Linear Regression, etc.
+  createdAt        DateTime     @default(now())
+
+  @@index([organizationId, resourceType, predictionDate])
+}
+
+model Recommendation {
+  id                  String       @id @default(cuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  buildingId          String?
+  building            Building?    @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+  title               String
+  description         String
+  category            String       // WATER, ENERGY, WASTE, CARBON
+  priority            String       // LOW, MEDIUM, HIGH, CRITICAL
+  evidence            String
+  recommendedAction   String
+  estimatedBenefit    String?
+  status              String       @default("PROPOSED") // PROPOSED, ACCEPTED, IN_PROGRESS, COMPLETED, DISMISSED
+  implementationNotes String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([organizationId, category, status])
+}
+
+model Device {
+  id               String       @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  buildingId       String
+  building         Building     @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  deviceName       String
+  deviceType       String       // WATER_METER, ENERGY_METER, SMART_BIN_SCALE, ENVIRONMENTAL_SENSOR
+  apiKey           String?      @unique
+  deviceStatus     String       @default("SIMULATED") // ONLINE, OFFLINE, MAINTENANCE, SIMULATED
+  isSimulated      Boolean      @default(true)
+  lastReadingValue Float?
+  lastSeenAt       DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([organizationId, deviceType])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action         String       // CREATE, UPDATE, DELETE, IMPORT, LOGIN, RESOLVE_ALERT
+  entityType     String       // RESOURCE_RECORD, BUILDING, EMISSION_FACTOR, RECOMMENDATION, ANOMALY
+  entityId       String?
+  details        String?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+model AlertNotification {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title             String
+  message           String
+  severity          String       // INFO, WARNING, CRITICAL
+  category          String       // WATER, ENERGY, WASTE, CARBON, SYSTEM
+  relatedBuildingId String?
+  building          Building?    @relation(fields: [relatedBuildingId], references: [id], onDelete: SetNull)
+  isRead            Boolean      @default(false)
+  isResolved        Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+
+  @@index([organizationId, isRead, createdAt])
+}
